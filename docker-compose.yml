@@ -74,9 +74,8 @@ services:
     build:
       context: ./mcp-servers/scraper
       dockerfile: Dockerfile
-    container_name: mcp-scraper-server
+    container_name: mcp-osm-scraper-server
     environment:
-      - YELP_API_KEY=${YELP_API_KEY}
       - PORT=3003
     ports:
       - "3003:3003"
@@ -112,7 +111,6 @@ services:
       - MCP_GOOGLE_MAPS_URL=http://mcp-google-maps:3004
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - YELP_API_KEY=${YELP_API_KEY}
       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
     ports:
       - "8000:8000"
