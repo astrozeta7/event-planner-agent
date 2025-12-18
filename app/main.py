@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 from typing import List
 
 from app.models import (
@@ -18,22 +18,33 @@ from app.services.venue_service import (
     build_event_room_response
 )
 from app.config import DEFAULT_EVENT_DURATION_HOURS
+from app.database import DatabaseConnection
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await DatabaseConnection.get_pool()
+    yield
+    await DatabaseConnection.close_pool()
 
 
 app = FastAPI(
-    title="Catering & Event Room Planning Agent",
-    description="API for planning events with catering and venue recommendations",
-    version="1.0.0"
+    title="Catering & Event Room Planning Agent V2",
+    description="API for planning events with catering and venue recommendations - PostgreSQL powered",
+    version="2.0.0",
+    lifespan=lifespan
 )
 
 
 @app.get("/")
 async def root():
     return {
-        "message": "Catering & Event Room Planning Agent API",
-        "version": "1.0.0",
+        "message": "Catering & Event Room Planning Agent API V2",
+        "version": "2.0.0",
+        "database": "PostgreSQL",
         "endpoints": {
             "plan_event": "POST /plan-event",
+            "health": "GET /health",
             "docs": "GET /docs"
         }
     }
@@ -41,39 +52,45 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    try:
+        pool = await DatabaseConnection.get_pool()
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        return {"status": "healthy", "database": "connected"}
+    except Exception as e:
+        return {"status": "unhealthy", "database": "disconnected", "error": str(e)}
 
 
 @app.post("/plan-event", response_model=EventPlanResponse)
 async def plan_event(request: EventPlanRequest):
     try:
-        filtered_catering = filter_catering_services(
+        filtered_catering = await filter_catering_services(
             location=request.location,
             number_of_guests=request.number_of_guests,
             cuisine_preferences=request.cuisine_preferences
         )
-        
-        catering_analysis = build_catering_analysis(
+
+        catering_analysis = await build_catering_analysis(
             services=filtered_catering,
             number_of_guests=request.number_of_guests,
             cuisine_preferences=request.cuisine_preferences
         )
-        
+
         event_rooms = []
         cheapest_catering_cost = 0.0
-        
+
         if request.needs_event_room:
-            filtered_rooms = filter_event_rooms(
+            filtered_rooms = await filter_event_rooms(
                 location=request.location,
                 number_of_guests=request.number_of_guests
             )
-            
-            cheapest_catering_cost = get_cheapest_catering_cost(
+
+            cheapest_catering_cost = await get_cheapest_catering_cost(
                 filtered_catering,
                 request.number_of_guests
             )
-            
-            event_rooms = build_event_room_response(
+
+            event_rooms = await build_event_room_response(
                 rooms=filtered_rooms,
                 cheapest_catering_cost=cheapest_catering_cost,
                 duration_hours=DEFAULT_EVENT_DURATION_HOURS
