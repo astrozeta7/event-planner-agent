@@ -326,5 +326,5 @@ function extractAmenities(categories) {
 
 app.listen(PORT, () => {
   console.log(`🔍 MCP Scraper Server running on port ${PORT}`);
-  console.log(`Yelp API: ${YELP_API_KEY ? '✅ Configured' : '❌ Missing'}`);
+  console.log(`✅ OpenStreetMap Overpass API - No API key needed!`);
 });

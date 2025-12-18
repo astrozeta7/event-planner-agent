@@ -1,5 +1,5 @@
 import express from 'express';
-import { Client } from '@googlemaps/google-maps-services-js';
+import axios from 'axios';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
@@ -7,316 +7,329 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3004;
-const client = new Client({});
+
+const NOMINATIM_URL = 'https://nominatim.openstreetmap.org';
+const PHOTON_URL = 'https://photon.komoot.io';
 
 app.use(cors());
 app.use(express.json());
 
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy', 
-    service: 'mcp-google-maps-server',
-    apis: {
-      google_maps: GOOGLE_MAPS_API_KEY ? 'configured' : 'missing'
-    }
+  res.json({
+    status: 'healthy',
+    service: 'mcp-geocoding-server',
+    apis: ['Nominatim', 'Photon'],
+    note: 'No API keys required!'
   });
-});
-
-app.post('/places/search', async (req, res) => {
-  try {
-    const { query, location, radius = 5000, type } = req.body;
-
-    if (!GOOGLE_MAPS_API_KEY) {
-      return res.status(500).json({ 
-        error: 'Google Maps API key not configured',
-        message: 'Please set GOOGLE_MAPS_API_KEY in environment variables'
-      });
-    }
-
-    const response = await client.textSearch({
-      params: {
-        query: query,
-        location: location,
-        radius: radius,
-        type: type,
-        key: GOOGLE_MAPS_API_KEY
-      }
-    });
-
-    const places = response.data.results.map(place => ({
-      place_id: place.place_id,
-      name: place.name,
-      address: place.formatted_address,
-      location: place.geometry.location,
-      rating: place.rating,
-      user_ratings_total: place.user_ratings_total,
-      price_level: place.price_level,
-      types: place.types,
-      business_status: place.business_status,
-      photos: place.photos?.map(photo => ({
-        photo_reference: photo.photo_reference,
-        width: photo.width,
-        height: photo.height
-      })),
-      opening_hours: place.opening_hours
-    }));
-
-    res.json({
-      success: true,
-      count: places.length,
-      data: places,
-      metadata: {
-        query: query,
-        location: location,
-        source: 'google_maps_places_api'
-      }
-    });
-
-  } catch (error) {
-    console.error('Google Maps API Error:', error.response?.data || error.message);
-    res.status(500).json({ 
-      error: 'Failed to search places',
-      message: error.response?.data?.error_message || error.message
-    });
-  }
-});
-
-app.post('/places/nearby', async (req, res) => {
-  try {
-    const { location, radius = 5000, type, keyword } = req.body;
-
-    if (!GOOGLE_MAPS_API_KEY) {
-      return res.status(500).json({ 
-        error: 'Google Maps API key not configured'
-      });
-    }
-
-    const response = await client.placesNearby({
-      params: {
-        location: location,
-        radius: radius,
-        type: type,
-        keyword: keyword,
-        key: GOOGLE_MAPS_API_KEY
-      }
-    });
-
-    const places = response.data.results.map(place => ({
-      place_id: place.place_id,
-      name: place.name,
-      vicinity: place.vicinity,
-      location: place.geometry.location,
-      rating: place.rating,
-      user_ratings_total: place.user_ratings_total,
-      price_level: place.price_level,
-      types: place.types,
-      business_status: place.business_status
-    }));
-
-    res.json({
-      success: true,
-      count: places.length,
-      data: places
-    });
-
-  } catch (error) {
-    console.error('Google Maps API Error:', error.response?.data || error.message);
-    res.status(500).json({ 
-      error: 'Failed to search nearby places',
-      message: error.response?.data?.error_message || error.message
-    });
-  }
-});
-
-app.post('/places/details/:place_id', async (req, res) => {
-  try {
-    const { place_id } = req.params;
-
-    if (!GOOGLE_MAPS_API_KEY) {
-      return res.status(500).json({ 
-        error: 'Google Maps API key not configured'
-      });
-    }
-
-    const response = await client.placeDetails({
-      params: {
-        place_id: place_id,
-        fields: [
-          'name',
-          'formatted_address',
-          'formatted_phone_number',
-          'website',
-          'rating',
-          'user_ratings_total',
-          'price_level',
-          'opening_hours',
-          'photos',
-          'reviews',
-          'geometry',
-          'types',
-          'business_status'
-        ],
-        key: GOOGLE_MAPS_API_KEY
-      }
-    });
-
-    const place = response.data.result;
-
-    res.json({
-      success: true,
-      data: {
-        place_id: place.place_id,
-        name: place.name,
-        address: place.formatted_address,
-        phone: place.formatted_phone_number,
-        website: place.website,
-        location: place.geometry?.location,
-        rating: place.rating,
-        user_ratings_total: place.user_ratings_total,
-        price_level: place.price_level,
-        opening_hours: place.opening_hours,
-        reviews: place.reviews?.map(review => ({
-          author_name: review.author_name,
-          rating: review.rating,
-          text: review.text,
-          time: review.time,
-          relative_time_description: review.relative_time_description
-        })),
-        photos: place.photos?.map(photo => ({
-          photo_reference: photo.photo_reference,
-          width: photo.width,
-          height: photo.height
-        })),
-        types: place.types,
-        business_status: place.business_status
-      }
-    });
-
-  } catch (error) {
-    console.error('Google Maps API Error:', error.response?.data || error.message);
-    res.status(500).json({ 
-      error: 'Failed to fetch place details',
-      message: error.response?.data?.error_message || error.message
-    });
-  }
-});
-
-app.post('/places/photo', async (req, res) => {
-  try {
-    const { photo_reference, maxwidth = 400 } = req.body;
-
-    if (!GOOGLE_MAPS_API_KEY) {
-      return res.status(500).json({ 
-        error: 'Google Maps API key not configured'
-      });
-    }
-
-    const photoUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=${maxwidth}&photo_reference=${photo_reference}&key=${GOOGLE_MAPS_API_KEY}`;
-
-    res.json({
-      success: true,
-      data: {
-        photo_url: photoUrl
-      }
-    });
-
-  } catch (error) {
-    console.error('Google Maps API Error:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to generate photo URL',
-      message: error.message
-    });
-  }
 });
 
 app.post('/geocode', async (req, res) => {
   try {
     const { address } = req.body;
 
-    if (!GOOGLE_MAPS_API_KEY) {
-      return res.status(500).json({ 
-        error: 'Google Maps API key not configured'
+    if (!address) {
+      return res.status(400).json({
+        error: 'Address is required',
+        message: 'Please provide an address to geocode'
       });
     }
 
-    const response = await client.geocode({
+    await delay(1000);
+
+    const response = await axios.get(`${NOMINATIM_URL}/search`, {
       params: {
-        address: address,
-        key: GOOGLE_MAPS_API_KEY
+        q: address,
+        format: 'json',
+        addressdetails: 1,
+        limit: 1
+      },
+      headers: {
+        'User-Agent': 'EventPlannerAgent/1.0'
       }
     });
 
-    const result = response.data.results[0];
+    if (response.data.length === 0) {
+      return res.status(404).json({
+        error: 'Location not found',
+        message: `Could not geocode address: ${address}`
+      });
+    }
 
+    const result = response.data[0];
     res.json({
       success: true,
-      data: {
-        formatted_address: result.formatted_address,
-        location: result.geometry.location,
-        place_id: result.place_id,
-        types: result.types
-      }
+      source: 'nominatim',
+      address: result.display_name,
+      latitude: parseFloat(result.lat),
+      longitude: parseFloat(result.lon),
+      place_id: result.place_id,
+      osm_type: result.osm_type,
+      osm_id: result.osm_id,
+      boundingbox: result.boundingbox
     });
 
   } catch (error) {
-    console.error('Google Maps API Error:', error.response?.data || error.message);
-    res.status(500).json({ 
-      error: 'Failed to geocode address',
-      message: error.response?.data?.error_message || error.message
+    console.error('Nominatim geocoding error:', error.message);
+    res.status(500).json({
+      error: 'Geocoding failed',
+      message: error.message
     });
   }
 });
 
-app.post('/directions', async (req, res) => {
+app.post('/reverse-geocode', async (req, res) => {
   try {
-    const { origin, destination, mode = 'driving' } = req.body;
+    const { latitude, longitude } = req.body;
 
-    if (!GOOGLE_MAPS_API_KEY) {
-      return res.status(500).json({ 
-        error: 'Google Maps API key not configured'
+    if (!latitude || !longitude) {
+      return res.status(400).json({
+        error: 'Latitude and longitude are required'
       });
     }
 
-    const response = await client.directions({
+    await delay(1000);
+
+    const response = await axios.get(`${NOMINATIM_URL}/reverse`, {
       params: {
-        origin: origin,
-        destination: destination,
-        mode: mode,
-        key: GOOGLE_MAPS_API_KEY
+        lat: latitude,
+        lon: longitude,
+        format: 'json',
+        addressdetails: 1
+      },
+      headers: {
+        'User-Agent': 'EventPlannerAgent/1.0'
       }
     });
-
-    const route = response.data.routes[0];
-    const leg = route.legs[0];
 
     res.json({
       success: true,
-      data: {
-        distance: leg.distance,
-        duration: leg.duration,
-        start_address: leg.start_address,
-        end_address: leg.end_address,
-        steps: leg.steps.map(step => ({
-          distance: step.distance,
-          duration: step.duration,
-          instructions: step.html_instructions,
-          travel_mode: step.travel_mode
-        }))
-      }
+      source: 'nominatim',
+      address: response.data.display_name,
+      place_id: response.data.place_id,
+      osm_type: response.data.osm_type,
+      osm_id: response.data.osm_id,
+      address_details: response.data.address
     });
 
   } catch (error) {
-    console.error('Google Maps API Error:', error.response?.data || error.message);
-    res.status(500).json({ 
-      error: 'Failed to get directions',
-      message: error.response?.data?.error_message || error.message
+    console.error('Nominatim reverse geocoding error:', error.message);
+    res.status(500).json({
+      error: 'Reverse geocoding failed',
+      message: error.message
     });
   }
 });
+
+app.post('/places/search', async (req, res) => {
+  try {
+    const { query, latitude, longitude, limit = 10 } = req.body;
+
+    if (!query) {
+      return res.status(400).json({
+        error: 'Query is required'
+      });
+    }
+
+    const params = {
+      q: query,
+      limit: limit
+    };
+
+    if (latitude && longitude) {
+      params.lat = latitude;
+      params.lon = longitude;
+    }
+
+    const response = await axios.get(`${PHOTON_URL}/api`, {
+      params: params
+    });
+
+    const places = response.data.features.map(feature => {
+      const props = feature.properties;
+      const coords = feature.geometry.coordinates;
+
+      return {
+        place_id: `photon_${props.osm_id}`,
+        external_id: `osm_${props.osm_id}`,
+        external_source: 'photon',
+        name: props.name || 'Unnamed',
+        address: formatPhotonAddress(props),
+        latitude: coords[1],
+        longitude: coords[0],
+        osm_type: props.osm_type,
+        osm_id: props.osm_id,
+        type: props.type,
+        city: props.city,
+        state: props.state,
+        country: props.country,
+        postcode: props.postcode
+      };
+    });
+
+    res.json({
+      success: true,
+      source: 'photon',
+      query: query,
+      count: places.length,
+      places: places
+    });
+
+  } catch (error) {
+    console.error('Photon search error:', error.message);
+    res.status(500).json({
+      error: 'Place search failed',
+      message: error.message
+    });
+  }
+});
+
+app.post('/places/nearby', async (req, res) => {
+  try {
+    const { latitude, longitude, radius_km = 5, type, limit = 20 } = req.body;
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({
+        error: 'Latitude and longitude are required'
+      });
+    }
+
+    const params = {
+      lat: latitude,
+      lon: longitude,
+      limit: limit
+    };
+
+    if (type) {
+      params.osm_tag = type;
+    }
+
+    const response = await axios.get(`${PHOTON_URL}/api`, {
+      params: params
+    });
+
+    const places = response.data.features
+      .map(feature => {
+        const props = feature.properties;
+        const coords = feature.geometry.coordinates;
+        const distance = calculateDistance(latitude, longitude, coords[1], coords[0]);
+
+        return {
+          place_id: `photon_${props.osm_id}`,
+          external_id: `osm_${props.osm_id}`,
+          external_source: 'photon',
+          name: props.name || 'Unnamed',
+          address: formatPhotonAddress(props),
+          latitude: coords[1],
+          longitude: coords[0],
+          distance_km: distance,
+          osm_type: props.osm_type,
+          osm_id: props.osm_id,
+          type: props.type,
+          city: props.city,
+          state: props.state,
+          country: props.country
+        };
+      })
+      .filter(place => place.distance_km <= radius_km)
+      .sort((a, b) => a.distance_km - b.distance_km);
+
+    res.json({
+      success: true,
+      source: 'photon',
+      center: { latitude, longitude },
+      radius_km: radius_km,
+      count: places.length,
+      places: places
+    });
+
+  } catch (error) {
+    console.error('Photon nearby search error:', error.message);
+    res.status(500).json({
+      error: 'Nearby search failed',
+      message: error.message
+    });
+  }
+});
+
+app.get('/places/details/:place_id', async (req, res) => {
+  try {
+    const { place_id } = req.params;
+
+    const osmId = place_id.replace('photon_', '').replace('osm_', '');
+
+    await delay(1000);
+
+    const response = await axios.get(`${NOMINATIM_URL}/lookup`, {
+      params: {
+        osm_ids: `N${osmId}`,
+        format: 'json',
+        addressdetails: 1,
+        extratags: 1
+      },
+      headers: {
+        'User-Agent': 'EventPlannerAgent/1.0'
+      }
+    });
+
+    if (response.data.length === 0) {
+      return res.status(404).json({
+        error: 'Place not found'
+      });
+    }
+
+    const place = response.data[0];
+    res.json({
+      success: true,
+      source: 'nominatim',
+      place_id: place.place_id,
+      osm_type: place.osm_type,
+      osm_id: place.osm_id,
+      name: place.display_name,
+      address: place.address,
+      latitude: parseFloat(place.lat),
+      longitude: parseFloat(place.lon),
+      extratags: place.extratags,
+      boundingbox: place.boundingbox
+    });
+
+  } catch (error) {
+    console.error('Nominatim place details error:', error.message);
+    res.status(500).json({
+      error: 'Failed to get place details',
+      message: error.message
+    });
+  }
+});
+
+function formatPhotonAddress(props) {
+  const parts = [];
+  if (props.housenumber) parts.push(props.housenumber);
+  if (props.street) parts.push(props.street);
+  if (props.city) parts.push(props.city);
+  if (props.state) parts.push(props.state);
+  if (props.postcode) parts.push(props.postcode);
+  if (props.country) parts.push(props.country);
+  return parts.join(', ') || 'Address not available';
+}
+
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
 
 app.listen(PORT, () => {
-  console.log(`🗺️  MCP Google Maps Server running on port ${PORT}`);
-  console.log(`Google Maps API: ${GOOGLE_MAPS_API_KEY ? '✅ Configured' : '❌ Missing'}`);
+  console.log(`🌍 MCP Geocoding Server running on port ${PORT}`);
+  console.log(`✅ Nominatim - No API key needed!`);
+  console.log(`✅ Photon - No API key needed!`);
+  console.log(`Using Nominatim: ${NOMINATIM_URL}`);
+  console.log(`Using Photon: ${PHOTON_URL}`);
 });
