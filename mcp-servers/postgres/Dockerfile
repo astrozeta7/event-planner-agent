@@ -2,10 +2,11 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-RUN npm install -g @modelcontextprotocol/server-postgres express body-parser cors
+COPY package.json .
+
+RUN npm install
 
 COPY server.js .
-COPY package.json .
 
 EXPOSE 3000
 
