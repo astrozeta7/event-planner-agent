@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from typing import List
+from pydantic import BaseModel
 
 from app.models import (
     EventPlanRequest,
@@ -17,6 +19,7 @@ from app.services.venue_service import (
     filter_event_rooms,
     build_event_room_response
 )
+from app.services.conversational_agent import ConversationalAgent
 from app.config import DEFAULT_EVENT_DURATION_HOURS
 from app.database import DatabaseConnection
 
@@ -35,6 +38,28 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+agent = ConversationalAgent()
+
+
+class ChatRequest(BaseModel):
+    message: str
+    current_data: dict = {}
+
+
+class ChatResponse(BaseModel):
+    message: str
+    updated_data: dict
+    ready_to_search: bool
+    missing_fields: List[str]
+
 
 @app.get("/")
 async def root():
@@ -43,6 +68,7 @@ async def root():
         "version": "2.0.0",
         "database": "PostgreSQL",
         "endpoints": {
+            "chat": "POST /chat",
             "plan_event": "POST /plan-event",
             "health": "GET /health",
             "docs": "GET /docs"
@@ -59,6 +85,18 @@ async def health_check():
         return {"status": "healthy", "database": "connected"}
     except Exception as e:
         return {"status": "unhealthy", "database": "disconnected", "error": str(e)}
+
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    try:
+        response = await agent.process_message(
+            message=request.message,
+            current_data=request.current_data
+        )
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
 
 
 @app.post("/plan-event", response_model=EventPlanResponse)

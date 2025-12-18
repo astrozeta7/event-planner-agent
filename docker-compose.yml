@@ -123,6 +123,23 @@ services:
       - event-planner-network
     restart: unless-stopped
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: event-planner-frontend
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - event-planner-network
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
   nginx:
     image: nginx:alpine
     container_name: event-planner-nginx
