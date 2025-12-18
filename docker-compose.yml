@@ -10,6 +10,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./database/seed_data.sql:/docker-entrypoint-initdb.d/02-seed.sql
+      - ./database/migrations:/docker-entrypoint-initdb.d/migrations
     ports:
       - "5432:5432"
     networks:
@@ -69,6 +70,34 @@ services:
       - gdrive_tokens:/app/tokens
     restart: unless-stopped
 
+  mcp-scraper:
+    build:
+      context: ./mcp-servers/scraper
+      dockerfile: Dockerfile
+    container_name: mcp-scraper-server
+    environment:
+      - YELP_API_KEY=${YELP_API_KEY}
+      - PORT=3003
+    ports:
+      - "3003:3003"
+    networks:
+      - event-planner-network
+    restart: unless-stopped
+
+  mcp-google-maps:
+    build:
+      context: ./mcp-servers/google-maps
+      dockerfile: Dockerfile
+    container_name: mcp-google-maps-server
+    environment:
+      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+      - PORT=3004
+    ports:
+      - "3004:3004"
+    networks:
+      - event-planner-network
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -79,8 +108,12 @@ services:
       - REDIS_URL=redis://redis:6379
       - MCP_POSTGRES_URL=http://mcp-postgres:3000
       - MCP_GDRIVE_URL=http://mcp-gdrive:3000
+      - MCP_SCRAPER_URL=http://mcp-scraper:3003
+      - MCP_GOOGLE_MAPS_URL=http://mcp-google-maps:3004
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - YELP_API_KEY=${YELP_API_KEY}
+      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
     ports:
       - "8000:8000"
     depends_on:
